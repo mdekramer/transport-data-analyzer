@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import timedelta
+from data_loader import count_weighted_shipments
 
 
 def render(df: pd.DataFrame):
@@ -71,11 +72,11 @@ def render(df: pd.DataFrame):
             cust = row["Customer Name"]
             first_date = row["First Order Date"]
             cutoff = first_date + timedelta(days=30)
-            orders_count = len(df_copy[
+            orders_count = df_copy[
                 (df_copy["Customer Name"] == cust) &
                 (df_copy["Order Placed Date"] >= first_date) &
                 (df_copy["Order Placed Date"] <= cutoff)
-            ])
+            ]["Shipment Weight"].sum()
             first_month_orders.append(orders_count)
         
         new_customers_in_month["Orders (First 30 Days)"] = first_month_orders
@@ -119,7 +120,7 @@ def render(df: pd.DataFrame):
 
         if len(new_lanes) > 0:
             # Extract customer name from lane
-            new_lanes["Customer Name"] = new_lanes["Lane"].str.split(" \| ").str[0]
+            new_lanes["Customer Name"] = new_lanes["Lane"].str.split(r" \| ").str[0]
             
             # Calculate orders in first 30 days per lane
             lane_first_month_orders = []
@@ -127,11 +128,11 @@ def render(df: pd.DataFrame):
                 lane = row["Lane"]
                 first_date = row["First Order Date"]
                 cutoff = first_date + timedelta(days=30)
-                orders_count = len(df_lanes[
+                orders_count = df_lanes[
                     (df_lanes["Lane"] == lane) &
                     (df_lanes["Order Placed Date"] >= first_date) &
                     (df_lanes["Order Placed Date"] <= cutoff)
-                ])
+                ]["Shipment Weight"].sum()
                 lane_first_month_orders.append(orders_count)
             
             new_lanes["Orders (First 30 Days)"] = lane_first_month_orders

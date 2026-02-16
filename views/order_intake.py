@@ -3,6 +3,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
+from data_loader import count_weighted_shipments
 
 
 def render(df: pd.DataFrame):
@@ -33,14 +34,14 @@ def render(df: pd.DataFrame):
     for year in available_years:
         yr_df = orders[orders["Year"] == year].copy()
         if agg == "Week":
-            grouped = yr_df.groupby("ISOWeek").size().reset_index(name="Orders")
+            grouped = yr_df.groupby("ISOWeek")["Shipment Weight"].sum().reset_index(name="Orders")
             grouped = grouped.sort_values("ISOWeek")
             grouped["Cumulative"] = grouped["Orders"].cumsum()
             x_vals = grouped["ISOWeek"]
             x_title = "Week #"
         else:
             yr_df["Month"] = yr_df["OPD"].dt.month
-            grouped = yr_df.groupby("Month").size().reset_index(name="Orders")
+            grouped = yr_df.groupby("Month")["Shipment Weight"].sum().reset_index(name="Orders")
             grouped = grouped.sort_values("Month")
             grouped["Cumulative"] = grouped["Orders"].cumsum()
             x_vals = grouped["Month"]
@@ -76,7 +77,7 @@ def render(df: pd.DataFrame):
     for year in available_years:
         yr_df = orders[orders["Year"] == year].copy()
         # Aggregate by day
-        daily = yr_df.groupby(yr_df["OPD"].dt.date).size().reset_index(name="Orders")
+        daily = yr_df.groupby(yr_df["OPD"].dt.date)["Shipment Weight"].sum().reset_index(name="Orders")
         daily.columns = ["Date", "Orders"]
         daily = daily.sort_values("Date")
         # Calculate day-of-year (1-366) for x-axis alignment
@@ -93,7 +94,7 @@ def render(df: pd.DataFrame):
     # Second pass: add all dots (on top) with matching colors
     for year in available_years:
         yr_df = orders[orders["Year"] == year].copy()
-        daily = yr_df.groupby(yr_df["OPD"].dt.date).size().reset_index(name="Orders")
+        daily = yr_df.groupby(yr_df["OPD"].dt.date)["Shipment Weight"].sum().reset_index(name="Orders")
         daily.columns = ["Date", "Orders"]
         daily = daily.sort_values("Date")
         daily["DayOfYear"] = pd.to_datetime(daily["Date"]).dt.dayofyear
@@ -124,7 +125,7 @@ def render(df: pd.DataFrame):
     # First pass: add all lines per year
     for year in available_years:
         yr_df = orders[orders["Year"] == year].copy()
-        daily = yr_df.groupby(yr_df["OPD"].dt.date).size().reset_index(name="Orders")
+        daily = yr_df.groupby(yr_df["OPD"].dt.date)["Shipment Weight"].sum().reset_index(name="Orders")
         daily.columns = ["Date", "Orders"]
         daily = daily.sort_values("Date")
         daily["DateStr"] = pd.to_datetime(daily["Date"]).dt.strftime("%d-%b-%Y")
@@ -138,7 +139,7 @@ def render(df: pd.DataFrame):
     # Second pass: add all dots per year
     for year in available_years:
         yr_df = orders[orders["Year"] == year].copy()
-        daily = yr_df.groupby(yr_df["OPD"].dt.date).size().reset_index(name="Orders")
+        daily = yr_df.groupby(yr_df["OPD"].dt.date)["Shipment Weight"].sum().reset_index(name="Orders")
         daily.columns = ["Date", "Orders"]
         daily = daily.sort_values("Date")
         daily["DateStr"] = pd.to_datetime(daily["Date"]).dt.strftime("%d-%b-%Y")
@@ -166,7 +167,7 @@ def render(df: pd.DataFrame):
         heat_orders = orders.copy()
         heat_orders.loc[heat_orders["Order DOW"].isin(["Saturday", "Sunday"]), "Order DOW"] = "Friday"
         heat_orders["YearWeek"] = heat_orders["Year"] + "-W" + heat_orders["ISOWeek"].astype(str).str.zfill(2)
-        heat = heat_orders.groupby(["YearWeek", "Order DOW"]).size().reset_index(name="Orders")
+        heat = heat_orders.groupby(["YearWeek", "Order DOW"])["Shipment Weight"].sum().reset_index(name="Orders")
         if not heat.empty:
             heat_pivot = heat.pivot(index="Order DOW", columns="YearWeek", values="Orders").fillna(0)
             heat_pivot = heat_pivot[sorted(heat_pivot.columns)]

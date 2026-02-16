@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import timedelta
+from data_loader import count_weighted_shipments
 
 
 def render(df: pd.DataFrame):
@@ -127,17 +128,17 @@ def render(df: pd.DataFrame):
         for bline in sorted(df_month["Business Line"].dropna().unique()):
             df_bline = df_month[df_month["Business Line"] == bline]
             
-            # Get top 15 customers for this business line
+            # Get top 15 customers for this business line (by weighted shipments)
             top_customers = (
-                df_bline["Customer Name"]
-                .value_counts()
-                .head(15)
+                df_bline.groupby("Customer Name")["Shipment Weight"]
+                .sum()
+                .nlargest(15)
                 .index.tolist()
             )
             
             # Add top customers
             for cust in top_customers:
-                count = len(df_bline[df_bline["Customer Name"] == cust])
+                count = df_bline[df_bline["Customer Name"] == cust]["Shipment Weight"].sum()
                 treemap_data.append({
                     "Business Line": bline,
                     "Customer": cust,
@@ -145,7 +146,7 @@ def render(df: pd.DataFrame):
                 })
             
             # Add "Others" for remaining customers
-            others_count = len(df_bline[~df_bline["Customer Name"].isin(top_customers)])
+            others_count = df_bline[~df_bline["Customer Name"].isin(top_customers)]["Shipment Weight"].sum()
             if others_count > 0:
                 treemap_data.append({
                     "Business Line": bline,

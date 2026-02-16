@@ -1,6 +1,7 @@
 import streamlit as st
 import plotly.express as px
 import pandas as pd
+from data_loader import count_weighted_shipments
 
 
 def render(df: pd.DataFrame):
@@ -58,7 +59,7 @@ def render(df: pd.DataFrame):
     with col_left:
         if "Modality" in df.columns:
             st.subheader("Modality")
-            mod = df["Modality"].value_counts().reset_index()
+            mod = df.groupby("Modality")["Shipment Weight"].sum().reset_index()
             mod.columns = ["Modality", "Count"]
             fig = px.pie(mod, names="Modality", values="Count", hole=0.4)
             fig.update_layout(margin=dict(t=20, b=20))
@@ -67,9 +68,9 @@ def render(df: pd.DataFrame):
     with col_right:
         if "Carrier" in df.columns:
             st.subheader("Top 10 Carriers")
-            carriers = df["Carrier"].replace("-", pd.NA).dropna()
-            if len(carriers) > 0:
-                carr = carriers.value_counts().head(10).reset_index()
+            carriers_df = df[df["Carrier"].notna() & (df["Carrier"] != "-")].copy()
+            if len(carriers_df) > 0:
+                carr = carriers_df.groupby("Carrier")["Shipment Weight"].sum().nlargest(10).reset_index()
                 carr.columns = ["Carrier", "Shipments"]
                 fig = px.bar(carr, x="Shipments", y="Carrier", orientation="h", text_auto=True)
                 fig.update_layout(
@@ -78,10 +79,10 @@ def render(df: pd.DataFrame):
                 )
                 st.plotly_chart(fig, width='stretch')
 
-    # ── Legal Entity breakdown ───────────────────────────────
+    # ── Legal Entity breakdown ────────────────────────────────────
     if "Legal Entity" in df.columns:
         st.subheader("Legal Entity")
-        le = df["Legal Entity"].value_counts().reset_index()
+        le = df.groupby("Legal Entity")["Shipment Weight"].sum().reset_index()
         le.columns = ["Legal Entity", "Count"]
         fig = px.bar(le, x="Legal Entity", y="Count", text_auto=True, color="Legal Entity")
         fig.update_layout(showlegend=False, margin=dict(t=20, b=20))
