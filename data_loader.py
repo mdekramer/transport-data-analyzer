@@ -56,6 +56,22 @@ def _clean_numeric(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _add_shipment_weight(df: pd.DataFrame) -> pd.DataFrame:
+    """Add shipment weight column based on Step Business Name.
+    
+    1-Step Business = 1.0 (full count)
+    All others = 0.5 (half count)
+    """
+    if "Step Business Name" in df.columns:
+        df["Shipment Weight"] = df["Step Business Name"].apply(
+            lambda x: 1.0 if (isinstance(x, str) and "1-Step Business" in x) else 0.5
+        )
+    else:
+        # Default to 1.0 if column doesn't exist (backward compatibility)
+        df["Shipment Weight"] = 1.0
+    return df
+
+
 def _derive_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Add derived helper columns."""
     if "Order Placed Date" in df.columns and "Load Date From" in df.columns:
@@ -88,11 +104,24 @@ def _derive_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def count_weighted_shipments(df: pd.DataFrame, by_column=None):
+    """Count shipments using Shipment Weight column.
+    
+    If by_column is None, returns total weighted count.
+    If by_column is specified, returns Series grouped by that column.
+    """
+    if by_column is None:
+        return df["Shipment Weight"].sum()
+    else:
+        return df.groupby(by_column)["Shipment Weight"].sum()
+
+
 @st.cache_data(show_spinner="Loading Excel data…")
 def load_data(file) -> pd.DataFrame:
     """Load and clean an Excel file, returning a processed DataFrame."""
     df = pd.read_excel(file, sheet_name=0, engine="openpyxl")
     df = _convert_serial_dates(df)
     df = _clean_numeric(df)
+    df = _add_shipment_weight(df)
     df = _derive_columns(df)
     return df
