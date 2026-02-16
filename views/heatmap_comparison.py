@@ -65,33 +65,33 @@ def render(df: pd.DataFrame):
     years_to_show = all_years[:3]
     
     with col_left:
-        st.write("**Compare Against Month**")
+        st.write("**Compare Against**")
         for year in sorted(years_to_show, reverse=True):
-            st.write(f"**{year}**")
             year_months = months_by_year[year]
-            # Always use 12 columns for equal sizing
-            year_cols = st.columns(12)
-            for i, month in enumerate(year_months):
-                with year_cols[month.month - 1]:  # January = index 0
+            # 6 columns = 2 rows of months per year
+            year_cols = st.columns(6)
+            for idx, month in enumerate(year_months):
+                with year_cols[idx % 6]:
                     is_selected = st.session_state.hm_compare_month == month
-                    button_label = format_month(month)
+                    icon = "✓" if is_selected else "○"
+                    label = f"{icon} {format_month(month)} {year}"
                     
-                    if st.button(button_label, key=f"btn_compare_{year}_{month.month}", use_container_width=True):
+                    if st.button(label, key=f"btn_compare_{year}_{month.month}", use_container_width=False):
                         st.session_state.hm_compare_month = month
     
     with col_right:
         st.write("**Main Month**")
         for year in sorted(years_to_show, reverse=True):
-            st.write(f"**{year}**")
             year_months = months_by_year[year]
-            # Always use 12 columns for equal sizing
-            year_cols = st.columns(12)
-            for i, month in enumerate(year_months):
-                with year_cols[month.month - 1]:  # January = index 0
+            # 6 columns = 2 rows of months per year
+            year_cols = st.columns(6)
+            for idx, month in enumerate(year_months):
+                with year_cols[idx % 6]:
                     is_selected = st.session_state.hm_main_month == month
-                    button_label = format_month(month)
+                    icon = "✓" if is_selected else "○"
+                    label = f"{icon} {format_month(month)} {year}"
                     
-                    if st.button(button_label, key=f"btn_main_{year}_{month.month}", use_container_width=True):
+                    if st.button(label, key=f"btn_main_{year}_{month.month}", use_container_width=False):
                         st.session_state.hm_main_month = month
     
     selected_month1 = st.session_state.hm_main_month
