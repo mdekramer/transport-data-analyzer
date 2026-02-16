@@ -31,12 +31,25 @@ def render(df: pd.DataFrame):
     
     col1, col2 = st.columns([2, 1])
     with col2:
+        # Get current week
+        today = pd.Timestamp.now()
+        current_year = today.year
+        current_week = today.isocalendar()[1]
+        current_week_str = f"{current_year}-W{current_week:02d}"
+        
         # Reverse weeks so most recent is first
         weeks_reversed = list(reversed(available_weeks))
+        
+        # Find index of current week, default to 0 (most recent) if not found
+        try:
+            default_index = weeks_reversed.index(current_week_str)
+        except ValueError:
+            default_index = 0
+        
         selected_week = st.selectbox(
             "Select Week",
             weeks_reversed,
-            index=0,
+            index=default_index,
             format_func=lambda x: str(x),
             label_visibility="collapsed"
         )

@@ -27,12 +27,23 @@ def render(df: pd.DataFrame):
     
     col1, col2 = st.columns([2, 1])
     with col2:
+        # Get current month
+        today = pd.Timestamp.now()
+        current_month = today.to_period("M")
+        
         # Reverse months so most recent is first
         months_reversed = list(reversed(available_months))
+        
+        # Find index of current month, default to 0 (most recent) if not found
+        try:
+            default_index = months_reversed.index(current_month)
+        except ValueError:
+            default_index = 0
+        
         selected_month = st.selectbox(
             "Select Month",
             months_reversed,
-            index=0,
+            index=default_index,
             format_func=lambda x: str(x),
             label_visibility="collapsed"
         )
