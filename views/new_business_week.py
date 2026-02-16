@@ -24,7 +24,7 @@ def render(df: pd.DataFrame):
     df_copy = df_full.copy()
     df_copy["Date"] = df_copy["Order Placed Date"].dt.date
     df_copy["ISOWeek"] = df_copy["Order Placed Date"].dt.isocalendar().week
-    df_copy["Year"] = df_copy["Order Placed Date"].dt.year.astype(int)
+    df_copy["Year"] = df_copy["Order Placed Date"].dt.year.astype("Int64")  # Int64 nullable type handles NaN
     df_copy["YearWeek"] = df_copy["Year"].astype(str) + "-W" + df_copy["ISOWeek"].astype(str).str.zfill(2)
     
     available_weeks = sorted(df_copy["YearWeek"].unique())
