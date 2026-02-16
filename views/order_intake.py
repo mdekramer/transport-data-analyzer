@@ -31,34 +31,99 @@ def render(df: pd.DataFrame):
     colors_yoy = {available_years[0]: "#d62728", available_years[1]: "#1f77b4"} if len(available_years) >= 2 else {year: ["#d62728", "#1f77b4"][i % 2] for i, year in enumerate(available_years)}
     
     fig = go.Figure()
+    year_data = {}
+    
+    # Collect data for all years
     for year in available_years:
         yr_df = orders[orders["Year"] == year].copy()
         if agg == "Week":
-            grouped = yr_df.groupby("ISOWeek")["Shipment Weight"].sum().reset_index(name="Orders")
+            grouped = yr_df.groupby("ISOWeek").agg({"Shipment Weight": "sum", "Shipment No": "count"}).reset_index()
+            grouped.columns = ["ISOWeek", "Orders", "Shipment Count"]
             grouped = grouped.sort_values("ISOWeek")
             grouped["Cumulative"] = grouped["Orders"].cumsum()
-            x_vals = grouped["ISOWeek"]
+            x_key = "ISOWeek"
             x_title = "Week #"
         else:
             yr_df["Month"] = yr_df["OPD"].dt.month
-            grouped = yr_df.groupby("Month")["Shipment Weight"].sum().reset_index(name="Orders")
+            grouped = yr_df.groupby("Month").agg({"Shipment Weight": "sum", "Shipment No": "count"}).reset_index()
+            grouped.columns = ["Month", "Orders", "Shipment Count"]
             grouped = grouped.sort_values("Month")
             grouped["Cumulative"] = grouped["Orders"].cumsum()
-            x_vals = grouped["Month"]
+            x_key = "Month"
             x_title = "Month"
-
+        
+        year_data[year] = grouped
+        x_vals = grouped[x_key]
+        
         fig.add_trace(go.Scatter(
             x=x_vals, y=grouped["Cumulative"],
             mode="lines+markers", name=year,
             line=dict(color=colors_yoy.get(year, "#1f77b4")),
             marker=dict(color=colors_yoy.get(year, "#1f77b4")),
-            hovertemplate=f"<b>{year}</b><br>{x_title}: %{{x}}<br>Cumulative: %{{y}}<extra></extra>",
+            customdata=grouped[["Orders", "Shipment Count"]].values,
+            hovertemplate=f"<b>{year}</b><br>{x_title}: %{{x}}<br>Period Weight: %{{customdata[0]:.1f}}<br>Shipments: %{{customdata[1]:.0f}}<br>Cumulative: %{{y:.1f}}<extra></extra>",
         ))
+    
+    # Add delta line if we have 2 or more years
+    if len(available_years) >= 2 and agg == "Week":
+        year1 = available_years[-1]  # Most recent year
+        year0 = available_years[-2]  # Previous year
+        
+        # Get week completeness data for both years
+        week_complete_y1 = set()
+        yr_df_y1 = orders[orders["Year"] == year1].copy()
+        for week in yr_df_y1["ISOWeek"].unique():
+            week_data = yr_df_y1[yr_df_y1["ISOWeek"] == week]
+            # Check if week has Friday (day 5) or later
+            has_friday_or_later = (week_data["OPD"].dt.dayofweek >= 4).any()
+            if has_friday_or_later:
+                week_complete_y1.add(week)
+        
+        week_complete_y0 = set()
+        yr_df_y0 = orders[orders["Year"] == year0].copy()
+        for week in yr_df_y0["ISOWeek"].unique():
+            week_data = yr_df_y0[yr_df_y0["ISOWeek"] == week]
+            # Check if week has Friday (day 5) or later
+            has_friday_or_later = (week_data["OPD"].dt.dayofweek >= 4).any()
+            if has_friday_or_later:
+                week_complete_y0.add(week)
+        
+        # Only keep weeks that are complete in both years
+        complete_weeks = week_complete_y1 & week_complete_y0
+        
+        df_y1 = year_data[year1].set_index(x_key)
+        df_y0 = year_data[year0].set_index(x_key)
+        
+        # Filter to complete weeks in both years
+        df_y1_filtered = df_y1[df_y1.index.isin(complete_weeks)]
+        df_y0_filtered = df_y0[df_y0.index.isin(complete_weeks)]
+        
+        # Only show delta where both years have data
+        merged = pd.DataFrame({"Y1": df_y1_filtered["Cumulative"], "Y0": df_y0_filtered["Cumulative"]}).dropna()
+        merged["Delta"] = merged["Y1"] - merged["Y0"]
+        
+        if not merged.empty:
+            fig.add_trace(go.Scatter(
+                x=merged.index, y=merged["Delta"],
+                mode="lines+markers", name=f"Delta ({year1} vs {year0})",
+                line=dict(color="#2ca02c", dash="dash", width=2),
+                marker=dict(color="#2ca02c", size=6),
+                yaxis="y2",
+                hovertemplate=f"<b>Delta</b><br>{x_title}: %{{x}}<br>Difference: %{{y:.1f}}<extra></extra>",
+            ))
 
-    fig.update_layout(
-        xaxis_title=x_title, yaxis_title="Cumulative Orders",
-        hovermode="x unified", margin=dict(t=30, b=40), legend_title="Year",
-    )
+    # Add secondary y-axis for delta if we have multiple years
+    if len(available_years) >= 2:
+        fig.update_layout(
+            xaxis_title=x_title, yaxis_title="Cumulative Orders",
+            yaxis2=dict(title="Delta (Difference)", overlaying="y", side="right"),
+            hovermode="x unified", margin=dict(t=30, b=40), legend_title="Year",
+        )
+    else:
+        fig.update_layout(
+            xaxis_title=x_title, yaxis_title="Cumulative Orders",
+            hovermode="x unified", margin=dict(t=30, b=40), legend_title="Year",
+        )
     st.plotly_chart(fig, width='stretch')
 
     # ══════════════════════════════════════════════════════════
@@ -83,8 +148,8 @@ def render(df: pd.DataFrame):
         # Calculate day-of-year (1-366) for x-axis alignment
         daily["DayOfYear"] = pd.to_datetime(daily["Date"]).dt.dayofyear
         daily["DateStr"] = pd.to_datetime(daily["Date"]).dt.strftime("%d-%b")
-        # Calculate rolling average per week (days in a week = 7)
-        daily["Smoothed"] = daily["Orders"].rolling(window=week_window * 7, min_periods=1, center=True).mean()
+        # Calculate rolling average per week (days in a week = 7) - backward-looking (trailing)
+        daily["Smoothed"] = daily["Orders"].rolling(window=week_window * 7, min_periods=1).mean()
         fig2.add_trace(go.Scatter(
             x=daily["DayOfYear"], y=daily["Smoothed"],
             mode="lines", name=year, line=dict(width=2, color=colors.get(year, "#1f77b4")),
@@ -129,7 +194,7 @@ def render(df: pd.DataFrame):
         daily.columns = ["Date", "Orders"]
         daily = daily.sort_values("Date")
         daily["DateStr"] = pd.to_datetime(daily["Date"]).dt.strftime("%d-%b-%Y")
-        daily["Smoothed"] = daily["Orders"].rolling(window=tl_window * 7, min_periods=1, center=True).mean()
+        daily["Smoothed"] = daily["Orders"].rolling(window=tl_window * 7, min_periods=1).mean()
         fig3.add_trace(go.Scatter(
             x=daily["Date"], y=daily["Smoothed"],
             mode="lines", name=year, line=dict(width=2, color=colors_yoy.get(year, "#1f77b4")),

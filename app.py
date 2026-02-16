@@ -8,7 +8,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from data_loader import load_data
-from views import overview, order_intake, customers, geography, operations, new_business, heatmap_comparison
+from views import overview, order_intake, customers, geography, operations, new_business, new_business_week, heatmap_comparison
 
 # ── Page config ──────────────────────────────────────────────
 st.set_page_config(
@@ -88,7 +88,8 @@ with st.sidebar:
         "📊 Overview": overview,
         "📈 Order Intake": order_intake,
         "👥 Customers": customers,
-        "🆕 New Business": new_business,
+        "🆕 New Business - Month": new_business,
+        "🆕 New Business - Week": new_business_week,
         "🔥 Heatmap Comparison": heatmap_comparison,
         "🌍 Geography": geography,
         "⚙️ Operations": operations,

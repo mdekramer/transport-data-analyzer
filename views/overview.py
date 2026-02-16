@@ -1,62 +1,354 @@
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
 import pandas as pd
+import numpy as np
 from data_loader import count_weighted_shipments
 
 
 def render(df: pd.DataFrame):
-    st.header("📊 Overview")
+    st.header("📊 Load Patterns")
 
-    # ── KPI row ──────────────────────────────────────────────
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Shipments", f"{df['Shipment Weight'].sum():,.1f}")
-    c2.metric("Unique Customers", df["Customer Name"].nunique() if "Customer Name" in df.columns else "N/A")
-    c3.metric("Total Weight (t)", f"{df['Weight'].sum() / 1000:,.1f}" if "Weight" in df.columns else "N/A")
-    c4.metric(
-        "Avg Total KM",
-        f"{df['Total KM'].mean():,.0f}" if "Total KM" in df.columns and df["Total KM"].notna().any() else "N/A",
+    if "Load Date From" not in df.columns or df["Load Date From"].isna().all():
+        st.warning("No 'Load Date From' data available for this analysis.")
+        return
+
+    # Filter out OPEN and CANCEL statuses
+    shipments = df[~df["Shipment Status"].isin(["OPEN", "CANCEL"])].dropna(subset=["Load Date From"]).copy()
+    
+    if len(shipments) == 0:
+        st.warning("No shipments available after filtering out OPEN and CANCEL statuses.")
+        return
+    
+    shipments["LDF"] = shipments["Load Date From"]
+    shipments["Year"] = shipments["LDF"].dt.year.astype(str)
+    shipments["ISOWeek"] = shipments["LDF"].dt.isocalendar().week.astype(int)
+
+    # Filter to only 2025 and 2026
+    shipments = shipments[shipments["Year"].isin(["2025", "2026"])]
+    
+    if len(shipments) == 0:
+        st.warning("No shipments found in 2025 or 2026.")
+        return
+
+    available_years = sorted(shipments["Year"].unique())
+
+    # ── Aggregation toggle ───────────────────────────────────
+    agg = st.radio("Aggregate by", ["Week", "Month"], horizontal=True, key="yoy_agg")
+
+    # ══════════════════════════════════════════════════════════
+    # 1. YEAR-OVER-YEAR RUNNING TOTAL
+    # ══════════════════════════════════════════════════════════
+    st.subheader("Year-over-Year Running Total")
+    # Colorblind-friendly colors: red and blue
+    colors_yoy = {available_years[0]: "#d62728", available_years[1]: "#1f77b4"} if len(available_years) >= 2 else {year: ["#d62728", "#1f77b4"][i % 2] for i, year in enumerate(available_years)}
+    
+    fig = go.Figure()
+    year_data = {}
+    
+    # Collect data for all years
+    for year in available_years:
+        yr_df = shipments[shipments["Year"] == year].copy()
+        if agg == "Week":
+            grouped = yr_df.groupby("ISOWeek").agg({"Shipment Weight": "sum", "Shipment No": "count"}).reset_index()
+            grouped.columns = ["ISOWeek", "Orders", "Shipment Count"]
+            grouped = grouped.sort_values("ISOWeek")
+            grouped["Cumulative"] = grouped["Orders"].cumsum()
+            x_key = "ISOWeek"
+            x_title = "Week #"
+        else:
+            yr_df["Month"] = yr_df["LDF"].dt.month
+            grouped = yr_df.groupby("Month").agg({"Shipment Weight": "sum", "Shipment No": "count"}).reset_index()
+            grouped.columns = ["Month", "Orders", "Shipment Count"]
+            grouped = grouped.sort_values("Month")
+            grouped["Cumulative"] = grouped["Orders"].cumsum()
+            x_key = "Month"
+            x_title = "Month"
+        
+        year_data[year] = grouped
+        x_vals = grouped[x_key]
+        
+        fig.add_trace(go.Scatter(
+            x=x_vals, y=grouped["Cumulative"],
+            mode="lines+markers", name=year,
+            line=dict(color=colors_yoy.get(year, "#1f77b4")),
+            marker=dict(color=colors_yoy.get(year, "#1f77b4")),
+            customdata=grouped[["Orders", "Shipment Count"]].values,
+            hovertemplate=f"<b>{year}</b><br>{x_title}: %{{x}}<br>Period Weight: %{{customdata[0]:.1f}}<br>Shipments: %{{customdata[1]:.0f}}<br>Cumulative: %{{y:.1f}}<extra></extra>",
+        ))
+    
+    # Add delta line if we have 2 or more years
+    if len(available_years) >= 2 and agg == "Week":
+        year1 = available_years[-1]  # Most recent year
+        year0 = available_years[-2]  # Previous year
+        today = pd.Timestamp.now()
+        today_date = today.date()
+        today_week = today.isocalendar()[1]
+        today_year = today.year
+        
+        # Get week completeness data for both years (Thursday = day 3 or later)
+        # AND only for weeks that are in the past or currently complete
+        week_complete_y1 = set()
+        yr_df_y1 = shipments[shipments["Year"] == year1].copy()
+        for week in yr_df_y1["ISOWeek"].unique():
+            week_data = yr_df_y1[yr_df_y1["ISOWeek"] == week]
+            # Check if week has Thursday (day 3) or later
+            has_thursday_or_later = (week_data["LDF"].dt.dayofweek >= 3).any()
+            # Only include weeks that are complete in the past
+            is_past = True
+            if int(year1) == today_year:
+                # If current year, only include weeks on or before today and before Thursday
+                is_past = week < today_week or (week == today_week and today.dayofweek >= 3)
+            if has_thursday_or_later and is_past:
+                week_complete_y1.add(week)
+        
+        week_complete_y0 = set()
+        yr_df_y0 = shipments[shipments["Year"] == year0].copy()
+        for week in yr_df_y0["ISOWeek"].unique():
+            week_data = yr_df_y0[yr_df_y0["ISOWeek"] == week]
+            # Check if week has Thursday (day 3) or later
+            has_thursday_or_later = (week_data["LDF"].dt.dayofweek >= 3).any()
+            if has_thursday_or_later:
+                week_complete_y0.add(week)
+        
+        # Only keep weeks that are complete in both years
+        complete_weeks = week_complete_y1 & week_complete_y0
+        
+        df_y1 = year_data[year1].set_index(x_key)
+        df_y0 = year_data[year0].set_index(x_key)
+        
+        # Filter to complete weeks in both years
+        df_y1_filtered = df_y1[df_y1.index.isin(complete_weeks)]
+        df_y0_filtered = df_y0[df_y0.index.isin(complete_weeks)]
+        
+        # Only show delta where both years have data
+        merged = pd.DataFrame({"Y1": df_y1_filtered["Cumulative"], "Y0": df_y0_filtered["Cumulative"]}).dropna()
+        merged["Delta"] = merged["Y1"] - merged["Y0"]
+        
+        if not merged.empty:
+            fig.add_trace(go.Scatter(
+                x=merged.index, y=merged["Delta"],
+                mode="lines+markers", name=f"Delta ({year1} vs {year0})",
+                line=dict(color="#2ca02c", dash="dash", width=2),
+                marker=dict(color="#2ca02c", size=6),
+                yaxis="y2",
+                hovertemplate=f"<b>Delta</b><br>{x_title}: %{{x}}<br>Difference: %{{y:.1f}}<extra></extra>",
+            ))
+
+    # Add secondary y-axis for delta if we have multiple years
+    if len(available_years) >= 2:
+        fig.update_layout(
+            xaxis_title=x_title, yaxis_title="Cumulative Loads",
+            yaxis2=dict(title="Delta (Difference)", overlaying="y", side="right"),
+            hovermode="x unified", margin=dict(t=30, b=40), legend_title="Year",
+        )
+    else:
+        fig.update_layout(
+            xaxis_title=x_title, yaxis_title="Cumulative Loads",
+            hovermode="x unified", margin=dict(t=30, b=40), legend_title="Year",
+        )
+    st.plotly_chart(fig, width='stretch')
+
+    # ══════════════════════════════════════════════════════════
+    # 2. WEEKLY COMPARISON (years side-by-side by day-of-year)
+    # ══════════════════════════════════════════════════════════
+    st.subheader("Load Volume — Year Comparison (Same Period)")
+    c1, c2 = st.columns([3, 1])
+    with c2:
+        week_window = st.selectbox("Rolling avg (weeks)", [1, 2, 3, 4], index=0, key="smooth_window", label_visibility="collapsed")
+    
+    # Colorblind-friendly colors: red and blue
+    colors = {available_years[0]: "#d62728", available_years[1]: "#1f77b4"} if len(available_years) >= 2 else {year: ["#d62728", "#1f77b4"][i % 2] for i, year in enumerate(available_years)}
+    
+    fig2 = go.Figure()
+    # Get today's date for filtering past dates
+    today = pd.Timestamp.now().date()
+    
+    # First pass: add all lines (aligned by day-of-year)
+    for year in available_years:
+        yr_df = shipments[shipments["Year"] == year].copy()
+        # Aggregate by day
+        daily = yr_df.groupby(yr_df["LDF"].dt.date)["Shipment Weight"].sum().reset_index(name="Orders")
+        daily.columns = ["Date", "Orders"]
+        daily = daily.sort_values("Date")
+        
+        # Only keep dates in the past
+        daily["DateObj"] = pd.to_datetime(daily["Date"])
+        daily = daily[daily["DateObj"].dt.date <= today]
+        
+        # Calculate day-of-year (1-366) for x-axis alignment
+        daily["DayOfYear"] = daily["DateObj"].dt.dayofyear
+        daily["DateStr"] = daily["DateObj"].dt.strftime("%d-%b")
+        # Calculate rolling average per week (days in a week = 7) - backward-looking (trailing)
+        daily["Smoothed"] = daily["Orders"].rolling(window=week_window * 7, min_periods=1).mean()
+        fig2.add_trace(go.Scatter(
+            x=daily["DayOfYear"], y=daily["Smoothed"],
+            mode="lines", name=year, line=dict(width=2, color=colors.get(year, "#1f77b4")),
+            customdata=daily["DateStr"],
+            hovertemplate="<b>%{customdata}</b><br>" + year + "<br>Avg: %{y:.1f}<extra></extra>",
+        ))
+    # Second pass: add all dots (on top) with matching colors
+    for year in available_years:
+        yr_df = shipments[shipments["Year"] == year].copy()
+        daily = yr_df.groupby(yr_df["LDF"].dt.date)["Shipment Weight"].sum().reset_index(name="Orders")
+        daily.columns = ["Date", "Orders"]
+        daily = daily.sort_values("Date")
+        
+        # Only keep dates in the past
+        daily["DateObj"] = pd.to_datetime(daily["Date"])
+        daily = daily[daily["DateObj"].dt.date <= today]
+        
+        daily["DayOfYear"] = daily["DateObj"].dt.dayofyear
+        daily["DateStr"] = daily["DateObj"].dt.strftime("%d-%b")
+        fig2.add_trace(go.Scatter(
+            x=daily["DayOfYear"], y=daily["Orders"],
+            mode="markers", name=f"{year} (daily)", marker=dict(size=4, opacity=0.5, color=colors.get(year, "#1f77b4")),
+            customdata=daily["DateStr"],
+            hovertemplate="<b>%{customdata}</b><br>" + year + " (daily)<br>Orders: %{y}<extra></extra>",
+            showlegend=False,
+        ))
+
+    fig2.update_layout(
+        xaxis_title="Day of Year (Jan 1 → Dec 31)", yaxis_title=f"# Loads ({week_window}-week rolling avg)",
+        hovermode="x unified", margin=dict(t=30, b=40), legend_title="Year",
     )
+    st.plotly_chart(fig2, width='stretch')
 
-    st.divider()
+    # ══════════════════════════════════════════════════════════
+    # 3. FULL TIMELINE (all years continuous, daily detail with week smoothing)
+    # ══════════════════════════════════════════════════════════
+    st.subheader("Full Timeline — All Years (Continuous)")
+    c1_tl, c2_tl = st.columns([3, 1])
+    with c2_tl:
+        tl_window = st.selectbox("Rolling avg (weeks)", [1, 2, 3, 4], index=0, key="timeline_window", label_visibility="collapsed")
+    
+    fig3 = go.Figure()
+    # First pass: add all lines per year
+    for year in available_years:
+        yr_df = shipments[shipments["Year"] == year].copy()
+        daily = yr_df.groupby(yr_df["LDF"].dt.date)["Shipment Weight"].sum().reset_index(name="Orders")
+        daily.columns = ["Date", "Orders"]
+        daily = daily.sort_values("Date")
+        daily["DateStr"] = pd.to_datetime(daily["Date"]).dt.strftime("%d-%b-%Y")
+        daily["Smoothed"] = daily["Orders"].rolling(window=tl_window * 7, min_periods=1).mean()
+        fig3.add_trace(go.Scatter(
+            x=daily["Date"], y=daily["Smoothed"],
+            mode="lines", name=year, line=dict(width=2, color=colors_yoy.get(year, "#1f77b4")),
+            customdata=daily["DateStr"],
+            hovertemplate="<b>%{customdata}</b><br>" + year + "<br>Avg: %{y:.1f}<extra></extra>",
+        ))
+    # Second pass: add all dots per year
+    for year in available_years:
+        yr_df = shipments[shipments["Year"] == year].copy()
+        daily = yr_df.groupby(yr_df["LDF"].dt.date)["Shipment Weight"].sum().reset_index(name="Orders")
+        daily.columns = ["Date", "Orders"]
+        daily = daily.sort_values("Date")
+        daily["DateStr"] = pd.to_datetime(daily["Date"]).dt.strftime("%d-%b-%Y")
+        fig3.add_trace(go.Scatter(
+            x=daily["Date"], y=daily["Orders"],
+            mode="markers", name=f"{year} (daily)", marker=dict(size=4, opacity=0.5, color=colors_yoy.get(year, "#1f77b4")),
+            customdata=daily["DateStr"],
+            hovertemplate="<b>%{customdata}</b><br>" + year + " (daily)<br>Orders: %{y}<extra></extra>",
+            showlegend=False,
+        ))
+    
+    fig3.update_layout(
+        xaxis_title="Date", yaxis_title=f"# Loads ({tl_window}-week rolling avg)",
+        hovermode="x unified", margin=dict(t=30, b=40), legend_title="Year",
+    )
+    st.plotly_chart(fig3, width='stretch')
 
-    # ── Status breakdown ─────────────────────────────────────
-    col_left, col_right = st.columns(2)
+    # ══════════════════════════════════════════════════════════
+    # 4. HEATMAP — full continuous timeline (Mon–Fri, weekends → Friday)
+    # ══════════════════════════════════════════════════════════
+    st.subheader("Load Volume Heatmap (Week × Day) — Full Timeline")
+    dow_weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+    if "Load DOW" in shipments.columns:
+        # Move Saturday/Sunday orders to Friday
+        heat_shipments = shipments.copy()
+        heat_shipments.loc[heat_shipments["Load DOW"].isin(["Saturday", "Sunday"]), "Load DOW"] = "Friday"
+        heat_shipments["YearWeek"] = heat_shipments["Year"] + "-W" + heat_shipments["ISOWeek"].astype(str).str.zfill(2)
+        heat = heat_shipments.groupby(["YearWeek", "Load DOW"])["Shipment Weight"].sum().reset_index(name="Orders")
+        if not heat.empty:
+            heat_pivot = heat.pivot(index="Load DOW", columns="YearWeek", values="Orders").fillna(0)
+            heat_pivot = heat_pivot[sorted(heat_pivot.columns)]
+            heat_pivot = heat_pivot.reindex([d for d in dow_weekdays if d in heat_pivot.index])
+            fig5 = px.imshow(
+                heat_pivot,
+                labels=dict(x="Year-Week", y="Day", color="Loads"),
+                color_continuous_scale="YlOrRd",
+                aspect="auto",
+            )
+            fig5.update_layout(margin=dict(t=20, b=20))
+            st.plotly_chart(fig5, width='stretch')
 
-    with col_left:
-        if "Shipment Status" in df.columns:
-            st.subheader("Shipment Status")
-            status_counts = df.groupby("Shipment Status")["Shipment Weight"].sum().reset_index()
-            status_counts.columns = ["Status", "Count"]
-            fig = px.pie(status_counts, names="Status", values="Count", hole=0.4)
-            fig.update_layout(margin=dict(t=20, b=20))
-            st.plotly_chart(fig, width='stretch')
+    # ══════════════════════════════════════════════════════════
+    # 5. LEAD TIME TABLE (working days)
+    # ══════════════════════════════════════════════════════════
+    st.subheader("Lead Time (Working Days: Order Placed → Load Date)")
+    if "Order Placed Date" in shipments.columns and "Load Date From" in df.columns:
+        lt_df = shipments[["Shipment No", "Customer Name", "Order Placed Date", "Load Date From"]].dropna().copy()
+        if len(lt_df) > 0:
+            # Calculate working days (exclude Sat/Sun)
+            lt_df["Lead Time (Working Days)"] = lt_df.apply(
+                lambda r: np.busday_count(
+                    r["Order Placed Date"].date(),
+                    r["Load Date From"].date(),
+                ), axis=1,
+            )
+            # Filter out negatives
+            lt_df = lt_df[lt_df["Lead Time (Working Days)"] >= 0]
 
-    with col_right:
-        if "Spot / Dedicated" in df.columns:
-            st.subheader("Spot vs Dedicated")
-            sd_counts = df.groupby("Spot / Dedicated")["Shipment Weight"].sum().reset_index()
-            sd_counts.columns = ["Type", "Count"]
-            fig = px.bar(sd_counts, x="Type", y="Count", color="Type", text_auto=True)
-            fig.update_layout(showlegend=False, margin=dict(t=20, b=20))
-            st.plotly_chart(fig, width='stretch')
+            if len(lt_df) > 0:
+                avg_lt = lt_df["Lead Time (Working Days)"].mean()
+                med_lt = lt_df["Lead Time (Working Days)"].median()
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Average Lead Time", f"{avg_lt:.1f} working days")
+                c2.metric("Median Lead Time", f"{med_lt:.0f} working days")
+                c3.metric("Shipments with Lead Time", f"{len(lt_df):,}")
 
-    # ── Market & Business Line ───────────────────────────────
-    col_left2, col_right2 = st.columns(2)
+                # Histogram
+                lt_vals = lt_df["Lead Time (Working Days)"]
+                lt_clipped = lt_vals[lt_vals <= lt_vals.quantile(0.99)]
+                fig6 = px.histogram(lt_clipped, nbins=30, labels={"value": "Working Days"})
+                fig6.update_layout(
+                    xaxis_title="Lead Time (working days)", yaxis_title="# Shipments",
+                    showlegend=False, margin=dict(t=20, b=20),
+                )
+                st.plotly_chart(fig6, width='stretch')
 
-    with col_left2:
-        if "Market" in df.columns:
-            st.subheader("Market Breakdown")
-            market = df.groupby("Market")["Shipment Weight"].sum().reset_index()
-            market.columns = ["Market", "Count"]
-            fig = px.bar(market, x="Market", y="Count", color="Market", text_auto=True)
-            fig.update_layout(showlegend=False, margin=dict(t=20, b=20))
-            st.plotly_chart(fig, width='stretch')
-
-    with col_right2:
-        if "Business Line" in df.columns:
-            st.subheader("Business Line")
-            bl = df.groupby("Business Line")["Shipment Weight"].sum().reset_index()
-            bl.columns = ["Business Line", "Count"]
-            fig = px.bar(bl, x="Business Line", y="Count", color="Business Line", text_auto=True)
-            fig.update_layout(showlegend=False, margin=dict(t=20, b=20))
-            st.plotly_chart(fig, width='stretch')
+                # Lead time distribution by week
+                st.subheader("Lead Time Distribution by Week")
+                lt_df["YearWeek"] = lt_df["Order Placed Date"].dt.year.astype(str) + "-W" + lt_df["Order Placed Date"].dt.isocalendar().week.astype(str).str.zfill(2)
+                
+                # Create lead time buckets (ordered by duration)
+                def bucket_leadtime(lt):
+                    if lt < 3:
+                        return "1. <3 Days"
+                    elif lt < 7:
+                        return "2. 4-7 Days"
+                    elif lt < 14:
+                        return "3. 7-14 Days"
+                    else:
+                        return "4. >14 Days"
+                
+                lt_df["Bucket"] = lt_df["Lead Time (Working Days)"].apply(bucket_leadtime)
+                
+                # Pivot: weeks as columns, buckets as rows
+                pivot = lt_df.groupby(["Bucket", "YearWeek"]).size().unstack(fill_value=0)
+                # Reverse columns to show most recent (latest week) on the left
+                pivot = pivot[[c for c in sorted(pivot.columns, reverse=True)]]
+                # Add total row
+                total_row = pivot.sum()
+                pivot.loc["0. Total Orders"] = total_row
+                # Add average row
+                avg_row = lt_df.groupby("YearWeek")["Lead Time (Working Days)"].mean()
+                pivot.loc["5. Average"] = avg_row
+                # Sort rows by bucket order
+                pivot = pivot.sort_index()
+                
+                st.dataframe(pivot, width='stretch')
+            else:
+                st.info("No valid lead time data available.")
+    else:
+        st.info("Order Placed Date or Load Date From column not available.")
