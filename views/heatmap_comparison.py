@@ -48,9 +48,8 @@ def render(df: pd.DataFrame):
     
     col_left, col_right = st.columns(2)
     
-    def format_month(period):
-        months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-        return months[period.month - 1]
+    # Month abbrev with icons
+    month_icons = ['🄙', '🄚', '🄛', '🄜', '🄝', '🄞', '🄟', '🄠', '🄡', '🄢', '🄣', '🄤']
     
     # Group months by year
     months_by_year = {}
@@ -68,30 +67,40 @@ def render(df: pd.DataFrame):
         st.write("**Compare Against**")
         for year in sorted(years_to_show, reverse=True):
             year_months = months_by_year[year]
-            # 6 columns = 2 rows of months per year
-            year_cols = st.columns(6)
-            for idx, month in enumerate(year_months):
-                with year_cols[idx % 6]:
+            row_text = f"{year}: "
+            for month in sorted(year_months, key=lambda x: x.month):
+                is_selected = st.session_state.hm_compare_month == month
+                icon_char = month_icons[month.month - 1]
+                # Add visual indicator of selection
+                if is_selected:
+                    row_text += f"**{icon_char}** "
+                else:
+                    row_text += f"{icon_char} "
+            
+            # Create compact button row
+            cols = st.columns(len(year_months) + 1)
+            cols[0].write(f"**{year}:**")
+            for idx, month in enumerate(sorted(year_months, key=lambda x: x.month), 1):
+                with cols[idx]:
                     is_selected = st.session_state.hm_compare_month == month
-                    icon = "✓" if is_selected else "○"
-                    label = f"{icon} {format_month(month)} {year}"
-                    
-                    if st.button(label, key=f"btn_compare_{year}_{month.month}", use_container_width=False):
+                    icon_char = month_icons[month.month - 1]
+                    label = "●" + icon_char if is_selected else icon_char
+                    if st.button(label, key=f"btn_compare_{year}_{month.month}", help=f"{month}"):
                         st.session_state.hm_compare_month = month
     
     with col_right:
         st.write("**Main Month**")
         for year in sorted(years_to_show, reverse=True):
             year_months = months_by_year[year]
-            # 6 columns = 2 rows of months per year
-            year_cols = st.columns(6)
-            for idx, month in enumerate(year_months):
-                with year_cols[idx % 6]:
+            # Create compact button row
+            cols = st.columns(len(year_months) + 1)
+            cols[0].write(f"**{year}:**")
+            for idx, month in enumerate(sorted(year_months, key=lambda x: x.month), 1):
+                with cols[idx]:
                     is_selected = st.session_state.hm_main_month == month
-                    icon = "✓" if is_selected else "○"
-                    label = f"{icon} {format_month(month)} {year}"
-                    
-                    if st.button(label, key=f"btn_main_{year}_{month.month}", use_container_width=False):
+                    icon_char = month_icons[month.month - 1]
+                    label = "●" + icon_char if is_selected else icon_char
+                    if st.button(label, key=f"btn_main_{year}_{month.month}", help=f"{month}"):
                         st.session_state.hm_main_month = month
     
     selected_month1 = st.session_state.hm_main_month
