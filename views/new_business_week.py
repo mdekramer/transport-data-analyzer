@@ -83,11 +83,11 @@ def render(df: pd.DataFrame):
     st.subheader(f"🆕 New Customers — {selected_week}")
 
     if len(new_customers_in_week) > 0:
-        new_customers_in_week = new_customers_in_week.sort_values("First Order Date", ascending=False)
+        new_customers_display = new_customers_in_week.sort_values("First Order Date", ascending=False).copy()
         
         # Calculate orders in first 7 days from first order
         first_week_orders = []
-        for _, row in new_customers_in_week.iterrows():
+        for _, row in new_customers_display.iterrows():
             cust = row["Customer Name"]
             first_date = row["First Order Date"]
             cutoff = first_date + timedelta(days=7)
@@ -98,12 +98,12 @@ def render(df: pd.DataFrame):
             ]["Shipment Weight"].sum()
             first_week_orders.append(orders_count)
         
-        new_customers_in_week["Orders (First 7 Days)"] = first_week_orders
-        new_customers_in_week["First Order Date"] = new_customers_in_week["First Order Date"].dt.strftime("%d-%b-%Y")
+        new_customers_display["Orders (First 7 Days)"] = first_week_orders
+        new_customers_display["First Order Date"] = new_customers_display["First Order Date"].dt.strftime("%d-%b-%Y")
         
         display_cols = ["Customer Name", "First Order Date", "Orders (First 7 Days)"]
-        st.dataframe(new_customers_in_week[display_cols], use_container_width=True, hide_index=True)
-        st.caption(f"**{len(new_customers_in_week)}** new customers in {selected_week}")
+        st.dataframe(new_customers_display[display_cols], use_container_width=True, hide_index=True)
+        st.caption(f"**{len(new_customers_display)}** new customers in {selected_week}")
     else:
         st.info(f"No new customers in {selected_week}.")
 
@@ -142,7 +142,7 @@ def render(df: pd.DataFrame):
             new_lanes["Customer Name"] = new_lanes["Lane"].str.split(r" \| ").str[0]
             
             # Mark which lanes belong to new customers
-            new_customer_names = set(new_customers_in_week["Customer Name"].tolist())
+            new_customer_names = set(new_customers_in_week["Customer Name"].tolist()) if len(new_customers_in_week) > 0 else set()
             new_lanes["Is New Customer"] = new_lanes["Customer Name"].isin(new_customer_names)
             
             # Calculate orders in first 7 days per lane
