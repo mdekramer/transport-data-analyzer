@@ -29,7 +29,10 @@ NUMERIC_COLS = [
 
 
 def _convert_serial_dates(df: pd.DataFrame) -> pd.DataFrame:
-    """Convert Excel serial number columns to proper datetime."""
+    """Convert Excel serial number columns to proper datetime.
+    
+    Handles both Excel serial numbers and proper datetime objects.
+    """
     # pandas Timedelta maxes out at ~106,752 days (nanosecond precision),
     # so we must discard anything beyond a reasonable range BEFORE converting.
     # Serial 1 = 1900-01-01, Serial 73050 = 2099-12-31.
@@ -38,13 +41,18 @@ def _convert_serial_dates(df: pd.DataFrame) -> pd.DataFrame:
 
     for col in SERIAL_DATE_COLS:
         if col in df.columns:
-            numeric = pd.to_numeric(df[col], errors="coerce")
-            # NaN-out anything outside [1, 73050]; keeps NaN as NaN
-            numeric = numeric.where(numeric.between(MIN_SERIAL, MAX_SERIAL))
-            # Convert using pd.to_datetime — NOT timedelta arithmetic
-            df[col] = pd.to_datetime(
-                numeric, unit="D", origin="1899-12-30", errors="coerce"
-            )
+            # First, try to convert to datetime directly (in case it's already a datetime)
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+            
+            # If that didn't work (all NaT), try serial conversion on numeric values
+            if df[col].isna().all():
+                numeric = pd.to_numeric(df[col], errors="coerce")
+                # NaN-out anything outside [1, 73050]; keeps NaN as NaN
+                numeric = numeric.where(numeric.between(MIN_SERIAL, MAX_SERIAL))
+                # Convert using pd.to_datetime — NOT timedelta arithmetic
+                df[col] = pd.to_datetime(
+                    numeric, unit="D", origin="1899-12-30", errors="coerce"
+                )
     return df
 
 
