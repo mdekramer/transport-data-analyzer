@@ -48,8 +48,10 @@ def render(df: pd.DataFrame):
     
     col_left, col_right = st.columns(2)
     
-    # Month abbrev with icons
-    month_icons = ['🄙', '🄚', '🄛', '🄜', '🄝', '🄞', '🄟', '🄠', '🄡', '🄢', '🄣', '🄤']
+    # Month icons - using simple calendar symbols
+    month_icons = ['🟰', '🟱', '🟲', '🟳', '🟴', '🟵', '🟶', '🟷', '🟸', '🟹', '🟺', '🟻']
+    # Alternative set using different colored emojis for better visibility
+    month_names_short = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D']
     
     # Group months by year
     months_by_year = {}
@@ -79,12 +81,16 @@ def render(df: pd.DataFrame):
             
             # Create compact button row
             cols = st.columns(len(year_months) + 1)
-            cols[0].write(f"**{year}:**")
+            cols[0].write(f"**{year}**")
             for idx, month in enumerate(sorted(year_months, key=lambda x: x.month), 1):
                 with cols[idx]:
                     is_selected = st.session_state.hm_compare_month == month
-                    icon_char = month_icons[month.month - 1]
-                    label = "●" + icon_char if is_selected else icon_char
+                    month_letter = month_names_short[month.month - 1]
+                    # Use simple letter with visual indicator
+                    if is_selected:
+                        label = f"[{month_letter}]"
+                    else:
+                        label = month_letter
                     if st.button(label, key=f"btn_compare_{year}_{month.month}", help=f"{month}"):
                         st.session_state.hm_compare_month = month
     
@@ -94,12 +100,16 @@ def render(df: pd.DataFrame):
             year_months = months_by_year[year]
             # Create compact button row
             cols = st.columns(len(year_months) + 1)
-            cols[0].write(f"**{year}:**")
+            cols[0].write(f"**{year}**")
             for idx, month in enumerate(sorted(year_months, key=lambda x: x.month), 1):
                 with cols[idx]:
                     is_selected = st.session_state.hm_main_month == month
-                    icon_char = month_icons[month.month - 1]
-                    label = "●" + icon_char if is_selected else icon_char
+                    month_letter = month_names_short[month.month - 1]
+                    # Use simple letter with visual indicator
+                    if is_selected:
+                        label = f"[{month_letter}]"
+                    else:
+                        label = month_letter
                     if st.button(label, key=f"btn_main_{year}_{month.month}", help=f"{month}"):
                         st.session_state.hm_main_month = month
     
